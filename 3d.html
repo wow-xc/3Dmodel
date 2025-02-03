@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D 모델 뷰어 - 부트스트랩 통합 버전</title>
+    
+    <!-- 부트스트랩 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Three.js 라이브러리 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three/examples/js/controls/OrbitControls.js"></script>
+
+    <style>
+        #viewer {
+            width: 100%;
+            height: 70vh;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .toast-container {
+            z-index: 9999;
+        }
+    </style>
+</head>
+
+<body class="bg-light">
+    <!-- 네비게이션 바 -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">3D Viewer Pro</a>
+            <div class="d-flex gap-2">
+                <label class="btn btn-outline-light">
+                    📦 모델 업로드
+                    <input type="file" id="modelInput" hidden accept=".obj">
+                </label>
+                <label class="btn btn-outline-light">
+                    🎨 텍스처 추가
+                    <input type="file" id="textureInput" hidden accept=".jpg,.png,.jpeg">
+                </label>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 메인 콘텐츠 -->
+    <div class="container-fluid mt-4">
+        <div class="row g-4">
+            <!-- 3D 뷰어 영역 -->
+            <div class="col-lg-9">
+                <div class="card shadow-sm">
+                    <div class="card-body p-0">
+                        <div id="viewer"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 정보 패널 -->
+            <div class="col-lg-3">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-primary text-white">
+                        모델 정보
+                    </div>
+                    <div class="card-body">
+                        <dl class="row mb-0" id="file-info">
+                            <dt class="col-sm-5">파일 형식:</dt>
+                            <dd class="col-sm-7" id="file-type">-</dd>
+                            
+                            <dt class="col-sm-5">텍스처 상태:</dt>
+                            <dd class="col-sm-7" id="texture-status">미적용</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 토스트 알림 컨테이너 -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+    <!-- 부트스트랩 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Three.js 구현 코드 -->
+    <script>
+        let scene, camera, renderer, controls, currentModel = null;
+
+        // 초기화 함수
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / 500, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            
+            const viewer = document.getElementById('viewer');
+            renderer.setSize(viewer.offsetWidth, viewer.offsetHeight);
+            viewer.appendChild(renderer.domElement);
+
+            // 조명 설정
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(0, 10, 0);
+            scene.add(directionalLight);
+
+            // 카메라 위치
+            camera.position.set(0, 2, 5);
+
+            // OrbitControls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            const axesHelper = new THREE.AxesHelper(10); // 길이 10의 XYZ 축 표시
+            scene.add(axesHelper);
+
+            scene.background = new THREE.Color(0xE2E2E2); // 하늘색
+        }
+
+        // 파일 처리 시스템
+        const handleFileUpload = (type, file) => {
+            if (!validateFile(file, type)) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                if(type === 'model') processModel(e.target.result, file.name);
+                else applyTexture(e.target.result);
+            };
+            reader.onerror = (error) => showToast(`파일 오류: ${error}`, 'danger');
+            
+            type === 'model' ? reader.readAsText(file) : reader.readAsDataURL(file);
+        };
+
+        // 모델 처리
+        function processModel(content, filename) {
+            try {
+                if(currentModel) scene.remove(currentModel);
+                
+                currentModel = new THREE.OBJLoader().parse(content);
+                scene.add(currentModel);
+                updateFileInfo('file-type', `OBJ (${filename})`);
+                showToast('모델 로드 완료!', 'success');
+            } catch (error) {
+                showToast('모델 파싱 실패', 'danger');
+            }
+        }
+
+        // 텍스처 적용
+        function applyTexture(textureURL) {
+            new THREE.TextureLoader().load(textureURL, texture => {
+                currentModel.traverse(child => {
+                    if (child.isMesh) {
+                        child.material.map = texture;
+                        child.material.needsUpdate = true;
+                    }
+                });
+                updateFileInfo('texture-status', '적용 완료');
+                showToast('텍스처 적용 성공!', 'success');
+            }, undefined, error => showToast('텍스처 오류: ' + error, 'danger'));
+        }
+
+        // 유효성 검사
+        function validateFile(file, type) {
+            const validTypes = {
+                model: ['obj'],
+                texture: ['jpg', 'jpeg', 'png']
+            };
+            const ext = file.name.split('.').pop().toLowerCase();
+            
+            if (!validTypes[type].includes(ext)) {
+                showToast(`잘못된 파일 형식: .${ext}`, 'danger');
+                return false;
+            }
+            return true;
+        }
+
+        // UI 업데이트
+        function updateFileInfo(targetId, value) {
+            const element = document.getElementById(targetId);
+            element.textContent = value;
+            element.classList.add('text-success');
+            setTimeout(() => element.classList.remove('text-success'), 1000);
+        }
+
+        // 토스트 알림
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-bg-${type}`;
+            toast.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">${message}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>`;
+            
+            document.querySelector('.toast-container').appendChild(toast);
+            new bootstrap.Toast(toast, {autohide: true}).show();
+        }
+
+        // 리사이즈 핸들러
+        window.addEventListener('resize', () => {
+            const viewer = document.getElementById('viewer');
+            camera.aspect = viewer.offsetWidth / viewer.offsetHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(viewer.offsetWidth, viewer.offsetHeight);
+        });
+
+        // 이벤트 리스너
+        document.getElementById('modelInput').addEventListener('change', e => 
+            handleFileUpload('model', e.target.files[0]));
+        document.getElementById('textureInput').addEventListener('change', e => 
+            handleFileUpload('texture', e.target.files[0]));
+
+        // 애니메이션 루프
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // 초기화 실행
+        initThreeJS();
+        animate();
+    </script>
+</body>
+</html>
